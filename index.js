@@ -1,13 +1,33 @@
+/**
+ * gRPC library for Node.js.
+ * @external grpc
+ * @see {@link https://github.com/grpc/grpc-node}
+ */
+
+/**
+ * gRPC Protocol Buffer (proto) loader for Node.js.
+ * @external protoLoader
+ * @see {@link https://github.com/grpc/grpc-node/tree/master/packages/proto-loader}
+ */
+
+/**
+ * Colors library for Node.js terminal output.
+ * @external colors
+ * @see {@link https://github.com/Marak/colors.js}
+ */
+
 const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 require("colors");
+
 /**
- * Represents a gRPC server.
+ * Represents a gRPC Server.
  */
-class KgRPC {
+class Server {
     /**
-     * Default options for loading a proto file.
-     * @type {object}
+     * Default options for loading protobuf files.
+     * @type {Object}
+     * @static
      */
     static defaultProtoLoadingOptions = {
         keepCase: true,
@@ -16,60 +36,146 @@ class KgRPC {
         defaults: true,
         oneofs: true,
     };
+
+    /**
+     * gRPC server instance.
+     * @type {grpc.Server}
+     */
     server;
 
     /**
-     * Creates a new KgRPC instance.
-     * @param {object} [configs] - Optional configurations for the server.
+     * Creates an instance of Server.
+     * @param {Object} configs - Configuration options for the server.
      */
     constructor(configs) {
         this.server = new grpc.Server();
     }
 
     /**
-     * Binds and starts an insecure gRPC server.
-     * @param {string} hostAndPort - The host and port to bind the server to.
-     * @returns {void}
+     * Creates an insecure gRPC server.
+     * @param {string} host - The host address to bind the server to.
+     * @param {number} port - The port number to bind the server to.
+     * @param {Function} callback - Callback function to be called after the server is bound (optional).
      */
-    createInsecureServer(hostAndPort) {
+    createInsecureServer(host, port, callback) {
         this.server.bindAsync(
-            hostAndPort,
+            `${host}:${port}`,
             grpc.ServerCredentials.createInsecure(),
-            (err, port) => {
-                if (err) {
-                    console.error("Error starting server:".bgRed, err);
-                } else {
-                    console.log("Server started on port:".rainbow, port);
+            (err, boundPort) => {
+                if (typeof callback === "function") {
+                    callback(err, boundPort);
+                } else if (err) {
+                    throw new Error(
+                        `Failed to bind gRPC server: ${err.message}`
+                    );
                 }
             }
         );
     }
 
     /**
-     * Adds a gRPC service to the server.
-     * @param {string} protoFile - The path to the proto file.
-     * @param {*} protoMessagesPackage - The package containing the service definition.
-     * @param {string} serviceName - the name of the service that carry the methods
-     * @param {object} methods - The service methods to add.
-     * @param {object} [protoLoadingOptions] - Optional proto loading options.
-     * @returns {void}
+     * Adds a unary RPC service to the gRPC server.
+     * @param {string} protoFile - The path to the Protocol Buffers (protobuf) file.
+     * @param {string} protoMessagesPackage - The name of the protobuf messages package.
+     * @param {string} serviceName - The name of the service in the protobuf file.
+     * @param {Object} methods - The service method definitions.
+     * @param {Object} protoLoadingOptions - Options for loading the protobuf file (optional).
+     * @param {Function} callback - Callback function to be called after service addition (optional).
      */
     addService(
         protoFile,
         protoMessagesPackage,
         serviceName,
         methods,
-        protoLoadingOptions
+        protoLoadingOptions,
+        callback
     ) {
+        protoLoadingOptions =
+            protoLoadingOptions || Server.defaultProtoLoadingOptions;
         const packageDefinition = protoLoader.loadSync(
             protoFile,
-            protoLoadingOptions || KgRPC.defaultProtoLoadingOptions
+            protoLoadingOptions
         );
         const grpcObject = grpc.loadPackageDefinition(packageDefinition);
         const messagesPackage = grpcObject[protoMessagesPackage];
         this.server.addService(messagesPackage[serviceName].service, methods);
-        console.log("Service added".green);
+        callback ? callback(serviceName) : null;
     }
 }
 
-module.exports = KgRPC;
+/**
+ * Represents a gRPC Client.
+ */
+class Client {
+    /**
+     * Default options for loading protobuf files.
+     * @type {Object}
+     * @static
+     */
+    static defaultProtoLoadingOptions = {
+        keepCase: true,
+        longs: String,
+        enums: String,
+        defaults: true,
+        oneofs: true,
+    };
+
+    /**
+     * gRPC client instance.
+     * @type {grpc.Client}
+     */
+    client;
+
+    /**
+     * Creates an instance of Client.
+     */
+    constructor() {}
+
+    /**
+     * Creates an insecure connection to a gRPC server.
+     * @param {string} protoFile - The path to the Protocol Buffers (protobuf) file.
+     * @param {string} protoMessagesPackage - The name of the protobuf messages package.
+     * @param {string} serviceName - The name of the service in the protobuf file.
+     * @param {string} host - The host address of the gRPC server.
+     * @param {number} port - The port number of the gRPC server.
+     * @param {Object} [protoLoadingOptions=Client.defaultProtoLoadingOptions] - Options for loading the protobuf file (optional).
+     * @param {Function} [callback] - Callback function to be called after connection establishment (optional).
+     */
+    createInsecureConnection(
+        protoFile,
+        protoMessagesPackage,
+        serviceName,
+        host,
+        port,
+        protoLoadingOptions = Client.defaultProtoLoadingOptions,
+        callback
+    ) {
+        const packageDefinition = protoLoader.loadSync(
+            protoFile,
+            protoLoadingOptions
+        );
+        const grpcObject = grpc.loadPackageDefinition(packageDefinition);
+        const messagesPackage = grpcObject[protoMessagesPackage];
+        this.client = new messagesPackage[serviceName](
+            `${host}:${port}`,
+            grpc.credentials.createInsecure()
+        );
+        if (callback) {
+            callback(`${host}:${port}`);
+        }
+    }
+
+    /**
+     * Initiates a unary RPC call to the gRPC server.
+     * @param {string} methodName - The name of the RPC method to call.
+     * @param {Object} message - The request message to send.
+     * @param {Function} [callback] - Callback function to handle the response (optional).
+     * @returns {grpc.ClientUnaryCall} The RPC call object.
+     */
+    callServer(methodName, message, callback) {
+        const call = this.client[methodName](message, callback);
+        return call;
+    }
+}
+
+module.exports = { Server, Client };
